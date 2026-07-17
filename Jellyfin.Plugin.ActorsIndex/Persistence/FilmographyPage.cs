@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.Trombee.Persistence;
 
@@ -10,7 +11,7 @@ namespace Jellyfin.Plugin.Trombee.Persistence;
 /// <param name="Limit">The requested page size.</param>
 /// <param name="Items">The filmography items in the requested page.</param>
 public sealed record FilmographyPage(
-    int TotalRecordCount,
-    int StartIndex,
-    int Limit,
-    IReadOnlyList<FilmographyItem> Items);
+    [property: JsonPropertyName("totalRecordCount")] int TotalRecordCount,
+    [property: JsonPropertyName("startIndex")] int StartIndex,
+    [property: JsonPropertyName("limit")] int Limit,
+    [property: JsonPropertyName("items")] IReadOnlyList<FilmographyItem> Items);

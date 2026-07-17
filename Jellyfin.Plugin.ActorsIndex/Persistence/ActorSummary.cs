@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.Trombee.Persistence;
 
@@ -9,4 +10,8 @@ namespace Jellyfin.Plugin.Trombee.Persistence;
 /// <param name="Name">The actor display name.</param>
 /// <param name="Appearances">The number of distinct displayed items.</param>
 /// <param name="PersonId">The Jellyfin person item identifier, when available.</param>
-public sealed record ActorSummary(string ActorKey, string Name, int Appearances, Guid? PersonId);
+public sealed record ActorSummary(
+    [property: JsonPropertyName("actorKey")] string ActorKey,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("appearances")] int Appearances,
+    [property: JsonPropertyName("personId")] Guid? PersonId);

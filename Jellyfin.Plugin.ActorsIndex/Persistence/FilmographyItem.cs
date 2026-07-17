@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.Trombee.Persistence;
 
@@ -10,4 +11,9 @@ namespace Jellyfin.Plugin.Trombee.Persistence;
 /// <param name="Role">The distinct credited roles.</param>
 /// <param name="Year">The production year.</param>
 /// <param name="ItemType">The display item type.</param>
-public sealed record FilmographyItem(Guid ItemId, string ItemName, string Role, int? Year, string ItemType);
+public sealed record FilmographyItem(
+    [property: JsonPropertyName("itemId")] Guid ItemId,
+    [property: JsonPropertyName("itemName")] string ItemName,
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("year")] int? Year,
+    [property: JsonPropertyName("itemType")] string ItemType);
