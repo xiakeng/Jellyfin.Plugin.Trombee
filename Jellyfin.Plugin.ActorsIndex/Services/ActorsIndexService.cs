@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.Trombee.Persistence;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -9,43 +13,84 @@ using MediaBrowser.Controller.Library;
 namespace Jellyfin.Plugin.Trombee.Services;
 
 /// <summary>
-/// Provides Actors Index data access.
+/// Provides actors-index data access.
 /// </summary>
 public class ActorsIndexService
 {
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime ComputedAt, object Result)> Cache = new();
-
     private readonly ILibraryManager _libraryManager;
+    private readonly SqliteActorsIndexStore _store;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ActorsIndexService"/> class.
     /// </summary>
+    /// <param name="store">The durable actors-index store.</param>
     /// <param name="libraryManager">The Jellyfin library manager.</param>
-    public ActorsIndexService(ILibraryManager libraryManager)
+    public ActorsIndexService(SqliteActorsIndexStore store, ILibraryManager libraryManager)
     {
+        _store = store;
         _libraryManager = libraryManager;
     }
 
     /// <summary>
-    /// Returns whether the service is ready.
+    /// Returns a server-paged actor index directly from plugin-owned SQLite data.
     /// </summary>
-    /// <returns>A test payload.</returns>
-    public object GetStatus()
+    /// <param name="user">The Jellyfin user used to scope visible source items.</param>
+    /// <param name="query">The server-side query parameters.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <returns>The matching actor page.</returns>
+    public async Task<ActorsPage> GetActorsIndexAsync(
+        Jellyfin.Database.Implementations.Entities.User? user,
+        ActorsQuery query,
+        CancellationToken cancellationToken)
     {
-        return new
-        {
-            status = "ok",
-            libraryManagerAvailable = _libraryManager is not null
-        };
+        await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyCollection<Guid>? visibleSourceItemIds = user is null
+            ? null
+            : GetVisibleSourceItemIds(user, query.LibraryIds);
+        return await _store.QueryActorsAsync(query, visibleSourceItemIds, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Returns the top-level libraries (folders) visible to the given user, respecting
-    /// their library access permissions. Pass <c>null</c> to return every library.
+    /// Returns a server-paged filmography directly from plugin-owned SQLite data.
     /// </summary>
-    /// <param name="user">The user to scope the results to, or <c>null</c> for no scoping.</param>
-    /// <returns>A list of libraries with their ID and name.</returns>
+    /// <param name="user">The Jellyfin user used to scope visible source items.</param>
+    /// <param name="actorKey">The stable actor key.</param>
+    /// <param name="query">The server-side query parameters.</param>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <returns>The matching filmography page.</returns>
+    public async Task<FilmographyPage> GetFilmographyAsync(
+        Jellyfin.Database.Implementations.Entities.User? user,
+        string actorKey,
+        FilmographyQuery query,
+        CancellationToken cancellationToken)
+    {
+        await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyCollection<Guid>? visibleSourceItemIds = user is null
+            ? null
+            : GetVisibleSourceItemIds(user, query.LibraryIds);
+        return await _store
+            .QueryFilmographyAsync(actorKey, query, visibleSourceItemIds, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns the durable actors-index status.
+    /// </summary>
+    /// <param name="cancellationToken">A token that cancels the operation.</param>
+    /// <returns>The active generation and incremental watermark.</returns>
+    public async Task<ActorsIndexStatus> GetStatusAsync(CancellationToken cancellationToken)
+    {
+        await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        var generationId = await _store.GetActiveGenerationIdAsync(cancellationToken).ConfigureAwait(false);
+        var watermark = await _store.GetIncrementalWatermarkAsync(cancellationToken).ConfigureAwait(false);
+        return new ActorsIndexStatus(generationId.HasValue, generationId, watermark);
+    }
+
+    /// <summary>
+    /// Returns the top-level libraries visible to the given user.
+    /// </summary>
+    /// <param name="user">The user to scope the results to, or <see langword="null"/> for no scoping.</param>
+    /// <returns>A list of libraries with their identifiers and names.</returns>
     public object GetLibraries(Jellyfin.Database.Implementations.Entities.User? user = null)
     {
         var folders = user is not null
@@ -59,181 +104,10 @@ public class ActorsIndexService
                 id = f.Id.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
                 name = f.Name
             })
-            .OrderBy(f => f.name, System.StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => f.name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new { libraries };
-    }
-
-    /// <summary>
-    /// Returns the actors index: each person of the given type with their appearance count
-    /// and related items, scoped to the libraries the given user has access to. Pass
-    /// <c>null</c> user to include everything (used internally / by administrators).
-    /// </summary>
-    /// <param name="user">The user to scope the results to, or <c>null</c> for no scoping.</param>
-    /// <param name="personKind">The type of person to include (defaults to Actor).</param>
-    /// <param name="libraryIds">If provided, restrict results to these top-level library (folder) IDs.</param>
-    /// <returns>A sorted list of people with occurrence counts.</returns>
-    public object GetActorsIndex(Jellyfin.Database.Implementations.Entities.User? user = null, PersonKind personKind = PersonKind.Actor, System.Guid[]? libraryIds = null)
-    {
-        var cacheKey = string.Join(
-            '|',
-            user?.Id.ToString() ?? "admin",
-            personKind.ToString(),
-            libraryIds is { Length: > 0 } ? string.Join(',', libraryIds.OrderBy(id => id)) : "all");
-
-        if (Cache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.ComputedAt < CacheDuration)
-        {
-            return cached.Result;
-        }
-
-        var result = ComputeActorsIndex(user, personKind, libraryIds);
-        Cache[cacheKey] = (DateTime.UtcNow, result);
-        return result;
-    }
-
-    /// <summary>
-    /// Clears the cached actors index, forcing the next request to recompute it from scratch.
-    /// </summary>
-    public static void ClearCache()
-    {
-        Cache.Clear();
-    }
-
-    private object ComputeActorsIndex(Jellyfin.Database.Implementations.Entities.User? user, PersonKind personKind, System.Guid[]? libraryIds)
-    {
-        var config = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
-
-        // Get all movies and series from the library, scoped to what this user can see
-        // (respects library access permissions and parental controls), and optionally
-        // restricted to a specific set of libraries the caller selected.
-        System.Collections.Generic.IReadOnlyList<BaseItem> items;
-        if (libraryIds is { Length: > 0 })
-        {
-            // Query each selected library individually (via ParentId) and merge, rather than
-            // relying on TopParentIds — more reliable across Jellyfin versions.
-            var merged = new System.Collections.Generic.Dictionary<System.Guid, BaseItem>();
-            foreach (var libraryId in libraryIds)
-            {
-                var libraryItems = _libraryManager.GetItemList(new InternalItemsQuery(user)
-                {
-                    IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode },
-                    Recursive = true,
-                    ParentId = libraryId
-                });
-
-                foreach (var item in libraryItems)
-                {
-                    merged[item.Id] = item;
-                }
-            }
-
-            items = merged.Values.ToList();
-        }
-        else
-        {
-            items = _libraryManager.GetItemList(new InternalItemsQuery(user)
-            {
-                IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode },
-                Recursive = true
-            });
-        }
-
-        // Build actor-to-items mapping by querying people for each item. Keyed by item ID
-        // per actor (not a plain list) so that multiple episodes of the same series only
-        // ever produce a single "Series" entry, instead of one per episode.
-        var actorDict = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<System.Guid, (System.Guid ItemId, string ItemName, string? Role, int? Year, string ItemType)>>(
-            System.StringComparer.OrdinalIgnoreCase);
-
-        // "Actor" includes "Guest Star" credits too, since both represent on-screen
-        // appearances from a user's point of view (guest stars are common on TV series).
-        var matchesRequestedType = personKind == PersonKind.Actor
-            ? (System.Func<PersonKind, bool>)(t => t == PersonKind.Actor || t == PersonKind.GuestStar)
-            : t => t == personKind;
-
-        // Cache resolved series (id -> name/year) so repeated episodes of the same show
-        // don't each trigger a separate lookup.
-        var seriesCache = new System.Collections.Generic.Dictionary<System.Guid, (string Name, int? Year)>();
-
-        foreach (var item in items)
-        {
-            System.Guid effectiveId;
-            string effectiveName;
-            int? effectiveYear;
-            string effectiveType;
-
-            if (item is Episode episode && episode.SeriesId != System.Guid.Empty)
-            {
-                effectiveId = episode.SeriesId;
-                effectiveType = "Series";
-
-                if (!seriesCache.TryGetValue(episode.SeriesId, out var seriesInfo))
-                {
-                    var seriesItem = _libraryManager.GetItemById(episode.SeriesId);
-                    seriesInfo = (seriesItem?.Name ?? episode.SeriesName ?? item.Name, seriesItem?.ProductionYear);
-                    seriesCache[episode.SeriesId] = seriesInfo;
-                }
-
-                effectiveName = seriesInfo.Name;
-                effectiveYear = seriesInfo.Year;
-            }
-            else
-            {
-                effectiveId = item.Id;
-                effectiveName = item.Name;
-                effectiveYear = item.ProductionYear;
-                effectiveType = item.GetType().Name;
-            }
-
-            foreach (var person in _libraryManager.GetPeople(item))
-            {
-                if (!matchesRequestedType(person.Type) || person.Name is null)
-                {
-                    continue;
-                }
-
-                if (!actorDict.TryGetValue(person.Name, out var appearances))
-                {
-                    appearances = new System.Collections.Generic.Dictionary<System.Guid, (System.Guid, string, string?, int?, string)>();
-                    actorDict[person.Name] = appearances;
-                }
-
-                appearances[effectiveId] = (effectiveId, effectiveName, person.Role, effectiveYear, effectiveType);
-            }
-        }
-
-        // Resolve person item IDs for thumbnail images (one bulk query)
-        var personIdByName = _libraryManager
-            .GetItemList(new InternalItemsQuery { IncludeItemTypes = new[] { BaseItemKind.Person }, Recursive = true })
-            .Where(p => p.Name is not null)
-            .GroupBy(p => p.Name!, System.StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().Id.ToString(), System.StringComparer.OrdinalIgnoreCase);
-
-        var actors = actorDict
-            .Select(kvp =>
-            {
-                personIdByName.TryGetValue(kvp.Key, out var personId);
-                return new
-                {
-                    name = kvp.Key,
-                    appearances = kvp.Value.Count,
-                    personId,
-                    items = kvp.Value.Values
-                        .Select(x => new { itemId = x.ItemId, itemName = x.ItemName, role = x.Role, year = x.Year, itemType = x.ItemType })
-                        .ToArray()
-                };
-            })
-            .Where(a => a.appearances >= config.MinimumAppearances)
-            .OrderByDescending(a => a.appearances)
-            .ThenBy(a => a.name)
-            .ToArray();
-
-        return new
-        {
-            status = "ok",
-            totalActors = actors.Length,
-            actors
-        };
     }
 
     /// <summary>
@@ -264,5 +138,32 @@ public class ActorsIndexService
                 itemType = i.GetType().Name
             }).ToArray()
         };
+    }
+
+    private IReadOnlyCollection<Guid> GetVisibleSourceItemIds(
+        Jellyfin.Database.Implementations.Entities.User user,
+        IReadOnlyCollection<Guid> libraryIds)
+    {
+        if (libraryIds.Count == 0)
+        {
+            return _libraryManager.GetItemIds(new InternalItemsQuery(user)
+            {
+                IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode },
+                Recursive = true
+            });
+        }
+
+        var result = new HashSet<Guid>();
+        foreach (var libraryId in libraryIds)
+        {
+            result.UnionWith(_libraryManager.GetItemIds(new InternalItemsQuery(user)
+            {
+                IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode },
+                Recursive = true,
+                ParentId = libraryId
+            }));
+        }
+
+        return result;
     }
 }

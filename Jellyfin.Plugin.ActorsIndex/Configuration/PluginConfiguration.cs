@@ -21,4 +21,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether to show the role name.
     /// </summary>
     public bool ShowRoleName { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Jellyfin library changes are indexed immediately.
+    /// </summary>
+    public bool MonitorLibraryChanges { get; set; } = true;
 }
