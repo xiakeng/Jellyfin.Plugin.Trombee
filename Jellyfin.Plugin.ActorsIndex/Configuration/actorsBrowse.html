@@ -117,6 +117,10 @@
     #ab-page .ab-modal-poster-title { font-size: 0.82rem; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #ab-page .ab-modal-poster-year { font-size: 0.75rem; color: #888; }
     #ab-page .ab-modal-poster-card:hover .ab-modal-poster-title { color: #0097e6; }
+    #ab-modal-filmo-status { min-height: 24px; margin: 0 0 10px; color: #999; font-size: 0.88rem; }
+    #ab-page #ab-modal-more { display: none; min-height: 40px; margin: 18px auto 0; padding: 8px 18px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #eee; cursor: pointer; }
+    #ab-page #ab-modal-more:hover:not(:disabled) { background: #383838; }
+    #ab-page #ab-modal-more:disabled { opacity: 0.5; cursor: default; }
     #ab-page .ab-role { color: #777; }
 
     @media (max-width: 767px), (max-width: 1023px) and (max-height: 767px) {
@@ -250,15 +254,18 @@
                 </div>
             </div>
             <h3 id="ab-modal-filmo-title">Filmography</h3>
+            <div id="ab-modal-filmo-status" aria-live="polite"></div>
             <ul id="ab-modal-list"></ul>
+            <button id="ab-modal-more" type="button">Load more</button>
         </div>
     </div>
 
     <script type="text/javascript">
     (function () {
         'use strict';
-        var PAGE_SIZE = 60, allActors = [], currentSort = 'appearances';
-        var searchTerm = '', currentPage = 0, filteredActors = [], searchTimer = null;
+        var PAGE_SIZE = 60, actors = [], totalRecordCount = 0, currentSort = 'appearances';
+        var searchTerm = '', currentPage = 0, searchTimer = null, loadRequestId = 0;
+        var activeModalActor = null, modalNextStart = 0, modalTotalRecordCount = 0, modalRequestId = 0;
         var lastFocusedElement = null, resizeFrame = null;
         var trombeeHost = null, topBarTitle = null, trombeeBackBound = false;
         var modalHistoryClosing = false, modalHistoryTimer = null;
@@ -282,27 +289,41 @@
             var current = window.history.state;
             var state = Object.assign({}, current && typeof current === 'object' ? current : {});
             state.trombeeModal = true;
+            state.trombeeActorKey = actor.actorKey;
             state.trombeeActorId = actor.personId || '';
             state.trombeeActorName = actor.name;
+            state.trombeeActorAppearances = actor.appearances;
             window.history.pushState(state, '', window.location.href);
         }
         // Finds the actor needed when browser Forward restores a modal history entry.
         function getHistoryActor(state) {
             var actorId = state && state.trombeeActorId;
+            var actorKey = state && state.trombeeActorKey;
             var actorName = state && state.trombeeActorName;
             var actor = null;
-            if (actorId) {
-                actor = allActors.find(function (item) { return String(item.personId) === String(actorId); });
+            if (actorKey) {
+                actor = actors.find(function (item) { return item.actorKey === actorKey; });
             }
-            return actor || allActors.find(function (item) { return item.name === actorName; }) || null;
+            if (!actor && actorId) {
+                actor = actors.find(function (item) { return String(item.personId) === String(actorId); });
+            }
+            actor = actor || actors.find(function (item) { return item.name === actorName; });
+            return actor || (actorKey && actorName ? {
+                actorKey: actorKey,
+                personId: actorId || null,
+                name: actorName,
+                appearances: state.trombeeActorAppearances || 0
+            } : null);
         }
         // Removes modal-only fields when a history traversal cannot complete normally.
         function replaceModalHistoryWithPage() {
             var current = window.history.state;
             var state = Object.assign({}, current && typeof current === 'object' ? current : {});
             delete state.trombeeModal;
+            delete state.trombeeActorKey;
             delete state.trombeeActorId;
             delete state.trombeeActorName;
+            delete state.trombeeActorAppearances;
             window.history.replaceState(state, '', window.location.href);
         }
         // Leaves the Trombee shell clean before Jellyfin renders another SPA route.
@@ -439,13 +460,6 @@
             try { return ApiClient.getUrl('Items/'+id+'/Images/Primary',{maxWidth:300,quality:80}); }
             catch(e) { return window.location.origin+'/Items/'+id+'/Images/Primary?maxWidth=300&quality=80'; }
         }
-        function getFiltered() {
-            var term = searchTerm.toLowerCase().trim();
-            var list = term ? allActors.filter(function(a){return a.name.toLowerCase().indexOf(term)!==-1;}) : allActors;
-            return list.slice().sort(function(a,b){
-                return currentSort==='appearances' ? (b.appearances-a.appearances)||a.name.localeCompare(b.name) : a.name.localeCompare(b.name);
-            });
-        }
         function makeCard(actor) {
             var card = document.createElement('div');
             card.className = 'ab-card'; card.tabIndex = 0;
@@ -473,7 +487,7 @@
             openModal(actor);
         }
         function updatePager() {
-            var total = filteredActors.length;
+            var total = totalRecordCount;
             var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
             document.getElementById('ab-pg-info').textContent = (currentPage+1)+' / '+totalPages;
             document.getElementById('ab-pg-first').disabled = (currentPage === 0);
@@ -481,10 +495,9 @@
             document.getElementById('ab-pg-next').disabled  = (currentPage >= totalPages - 1);
             document.getElementById('ab-pg-last').disabled  = (currentPage >= totalPages - 1);
             var from = total === 0 ? 0 : currentPage * PAGE_SIZE + 1;
-            var to   = Math.min((currentPage+1) * PAGE_SIZE, total);
+            var to   = total === 0 ? 0 : from + actors.length - 1;
             var txt  = total === 0 ? 'No results.' :
-                'Actors '+from+'\u2013'+to+' of '+total+
-                (total < allActors.length ? ' (filtered from '+allActors.length+' total)' : '')+'.';
+                'Actors '+from+'\u2013'+to+' of '+total+'.';
             document.getElementById('ab-status').textContent = txt;
         }
         function scrollToTop() {
@@ -503,23 +516,104 @@
         function renderPage() {
             var grid = document.getElementById('ab-grid');
             grid.innerHTML = '';
-            var slice = filteredActors.slice(currentPage*PAGE_SIZE, (currentPage+1)*PAGE_SIZE);
             var frag = document.createDocumentFragment();
-            slice.forEach(function(a){ frag.appendChild(makeCard(a)); });
+            actors.forEach(function(a){ frag.appendChild(makeCard(a)); });
             grid.appendChild(frag);
             updatePager();
             scrollToTop();
         }
         function refresh() {
             currentPage = 0;
-            filteredActors = getFiltered();
-            renderPage();
+            loadData();
         }
         function itemPosterUrl(itemId) {
             try { return ApiClient.getUrl('Items/'+itemId+'/Images/Primary',{maxWidth:220,quality:80}); }
             catch(e) { return window.location.origin+'/Items/'+itemId+'/Images/Primary?maxWidth=220&quality=80'; }
         }
+        function appendFilmographyItems(items) {
+            var list = document.getElementById('ab-modal-list');
+            items.forEach(function(item){
+                var li=document.createElement('li');
+                var posterUrl = itemPosterUrl(item.itemId);
+                var titleAttr = esc(item.itemName) + (item.year ? ' (' + item.year + ')' : '');
+                li.innerHTML =
+                    '<a class="ab-modal-poster-card" href="#" data-item-id="'+esc(item.itemId)+'" title="'+titleAttr+'">' +
+                    (posterUrl
+                        ? '<img class="ab-modal-poster-img" src="'+esc(posterUrl)+'" loading="lazy" alt="">'
+                        : '<div class="ab-modal-poster-placeholder">&#127916;</div>') +
+                    '<div class="ab-modal-poster-title">'+esc(item.itemName)+'</div>' +
+                    (item.year ? '<div class="ab-modal-poster-year">'+item.year+'</div>' : '') +
+                    '</a>';
+                list.appendChild(li);
+                var posterImage = li.querySelector('.ab-modal-poster-img');
+                if (posterImage) {
+                    posterImage.addEventListener('error', function () {
+                        var placeholder = document.createElement('div');
+                        placeholder.className = 'ab-modal-poster-placeholder';
+                        placeholder.innerHTML = '&#127916;';
+                        this.replaceWith(placeholder);
+                    });
+                }
+                li.querySelector('a[data-item-id]').addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var itemId = this.getAttribute('data-item-id');
+                    var srv=''; try{srv=ApiClient.serverId();}catch(err){}
+                    var path='/details?id='+itemId+(srv?'&serverId='+srv:'');
+                    hideModal(false);
+                    // Keep the modal entry behind the detail page so Back restores this actor popup.
+                    navigateToJellyfinPath(path);
+                });
+            });
+        }
+        function loadFilmography(actor, append) {
+            if (!actor || !actor.actorKey) { return; }
+            var list = document.getElementById('ab-modal-list');
+            var statusEl = document.getElementById('ab-modal-filmo-status');
+            var moreButton = document.getElementById('ab-modal-more');
+            var startIndex = append ? modalNextStart : 0;
+            if (!append) {
+                list.innerHTML = '';
+                modalNextStart = 0;
+                modalTotalRecordCount = 0;
+            }
+
+            var typeSelect = document.getElementById('ab-type-select');
+            var params = {
+                startIndex: startIndex,
+                limit: PAGE_SIZE,
+                personType: typeSelect ? typeSelect.value : 'Actor'
+            };
+            var libraryIds = getSelectedLibraryIds();
+            if (libraryIds) { params.libraryIds = libraryIds; }
+
+            var requestId = ++modalRequestId;
+            statusEl.textContent = 'Loading\u2026';
+            moreButton.disabled = true;
+            moreButton.style.display = 'none';
+            var url = ApiClient.getUrl('Trombee/actors/' + encodeURIComponent(actor.actorKey) + '/items', params);
+            fetch(url, { headers: { 'X-Emby-Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
+                .then(function(r){ if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); })
+                .then(function(result){
+                    if (requestId !== modalRequestId || !activeModalActor || activeModalActor.actorKey !== actor.actorKey) { return; }
+                    var items = (result && result.items) || [];
+                    appendFilmographyItems(items);
+                    modalTotalRecordCount = (result && result.totalRecordCount) || 0;
+                    modalNextStart = startIndex + items.length;
+                    statusEl.textContent = modalTotalRecordCount === 0
+                        ? 'No titles found.'
+                        : modalTotalRecordCount + ' title' + (modalTotalRecordCount === 1 ? '' : 's');
+                    moreButton.disabled = false;
+                    moreButton.style.display = modalNextStart < modalTotalRecordCount ? 'block' : 'none';
+                })
+                ['catch'](function(){
+                    if (requestId !== modalRequestId) { return; }
+                    statusEl.textContent = 'Unable to load filmography.';
+                    moreButton.disabled = false;
+                    moreButton.style.display = append ? 'block' : 'none';
+                });
+        }
         function openModal(actor, fromHistory) {
+            activeModalActor = actor;
             document.getElementById('ab-modal-name').textContent=actor.name;
             var countText = actor.appearances+' appearance'+(actor.appearances===1?'':'s');
             if (getSelectedLibraryIds()) { countText += ' (filtered by library)'; }
@@ -553,41 +647,7 @@
                 } catch (e) { /* ApiClient.getItem unavailable, ignore */ }
             }
 
-            var list=document.getElementById('ab-modal-list'); list.innerHTML='';
-            (actor.items||[]).slice().sort(function(a,b){ return (b.year||0)-(a.year||0); }).forEach(function(item){
-                var li=document.createElement('li');
-                var posterUrl = itemPosterUrl(item.itemId);
-                var titleAttr = esc(item.itemName) + (item.year ? ' (' + item.year + ')' : '');
-                li.innerHTML =
-                    '<a class="ab-modal-poster-card" href="#" data-item-id="'+esc(item.itemId)+'" title="'+titleAttr+'">' +
-                    (posterUrl
-                        ? '<img class="ab-modal-poster-img" src="'+esc(posterUrl)+'" loading="lazy" alt="">'
-                        : '<div class="ab-modal-poster-placeholder">&#127916;</div>') +
-                    '<div class="ab-modal-poster-title">'+esc(item.itemName)+'</div>' +
-                    (item.year ? '<div class="ab-modal-poster-year">'+item.year+'</div>' : '') +
-                    '</a>';
-                list.appendChild(li);
-                var posterImage = li.querySelector('.ab-modal-poster-img');
-                if (posterImage) {
-                    posterImage.addEventListener('error', function () {
-                        var placeholder = document.createElement('div');
-                        placeholder.className = 'ab-modal-poster-placeholder';
-                        placeholder.innerHTML = '&#127916;';
-                        this.replaceWith(placeholder);
-                    });
-                }
-            });
-            list.querySelectorAll('a[data-item-id]').forEach(function (a) {
-                a.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    var itemId = this.getAttribute('data-item-id');
-                    var srv=''; try{srv=ApiClient.serverId();}catch(err){}
-                    var path='/details?id='+itemId+(srv?'&serverId='+srv:'');
-                    hideModal(false);
-                    // Keep the modal entry behind the detail page so Back restores this actor popup.
-                    navigateToJellyfinPath(path);
-                });
-            });
+            loadFilmography(actor, false);
 
             if (!fromHistory) { pushModalHistory(actor); }
             document.getElementById('ab-overlay').classList.add('open');
@@ -596,6 +656,8 @@
         // Hides the popup without changing history; browser traversal is handled separately.
         function hideModal(restoreFocus) {
             document.getElementById('ab-overlay').classList.remove('open');
+            activeModalActor = null;
+            modalRequestId++;
             if (restoreFocus && lastFocusedElement && document.documentElement.contains(lastFocusedElement)) {
                 lastFocusedElement.focus();
             }
@@ -631,11 +693,11 @@
 
         function init() {
             activateTrombeeShell();
-            var totalPages = function(){ return Math.max(1, Math.ceil(filteredActors.length/PAGE_SIZE)); };
-            document.getElementById('ab-pg-first').addEventListener('click', function(){ currentPage=0; renderPage(); });
-            document.getElementById('ab-pg-prev').addEventListener('click',  function(){ if(currentPage>0){currentPage--;renderPage();} });
-            document.getElementById('ab-pg-next').addEventListener('click',  function(){ if(currentPage<totalPages()-1){currentPage++;renderPage();} });
-            document.getElementById('ab-pg-last').addEventListener('click',  function(){ currentPage=totalPages()-1; renderPage(); });
+            var totalPages = function(){ return Math.max(1, Math.ceil(totalRecordCount/PAGE_SIZE)); };
+            document.getElementById('ab-pg-first').addEventListener('click', function(){ if(currentPage!==0){currentPage=0;loadData();} });
+            document.getElementById('ab-pg-prev').addEventListener('click',  function(){ if(currentPage>0){currentPage--;loadData();} });
+            document.getElementById('ab-pg-next').addEventListener('click',  function(){ if(currentPage<totalPages()-1){currentPage++;loadData();} });
+            document.getElementById('ab-pg-last').addEventListener('click',  function(){ var last=totalPages()-1;if(currentPage!==last){currentPage=last;loadData();} });
             document.getElementById('ab-search').addEventListener('input', function(){
                 var val=this.value; clearTimeout(searchTimer);
                 searchTimer=setTimeout(function(){searchTerm=val;refresh();},260);
@@ -657,6 +719,9 @@
                 refresh();
             });
             document.getElementById('ab-modal-close').addEventListener('click', closeModal);
+            document.getElementById('ab-modal-more').addEventListener('click', function(){
+                if (activeModalActor) { loadFilmography(activeModalActor, true); }
+            });
             document.getElementById('ab-overlay').addEventListener('click', function(e){ if(e.target===this){closeModal();} });
             document.addEventListener('keydown', function(e){
                 if ((e.key==='Escape'||e.key==='XF86Back') && document.getElementById('ab-overlay').classList.contains('open')) {
@@ -671,7 +736,7 @@
                 else { window.location.hash = p; }
             });
             document.getElementById('ab-type-select').addEventListener('change', function () {
-                loadData();
+                refresh();
             });
             document.getElementById('ab-filter-toggle').addEventListener('click', function () {
                 var controls = document.getElementById('ab-sort-wrap');
@@ -760,14 +825,14 @@
                     allBox.addEventListener('change', function () {
                         itemBoxes.forEach(function (cb) { cb.checked = allBox.checked; });
                         updateLibButtonLabel();
-                        loadData();
+                        refresh();
                     });
                     itemBoxes.forEach(function (cb) {
                         cb.addEventListener('change', function () {
                             var allChecked = Array.prototype.every.call(itemBoxes, function (c) { return c.checked; });
                             allBox.checked = allChecked;
                             updateLibButtonLabel();
-                            loadData();
+                            refresh();
                         });
                     });
                 })
@@ -804,12 +869,20 @@
             var typeSelect = document.getElementById('ab-type-select');
             var personType = typeSelect ? typeSelect.value : 'Actor';
             var typeLabel = typeSelect ? typeSelect.options[typeSelect.selectedIndex].text : 'Actor';
+            var requestId = ++loadRequestId;
 
             var statusEl = document.getElementById('ab-status');
             statusEl.textContent = 'Loading\u2026';
             document.getElementById('ab-search').placeholder = 'Search ' + typeLabel.toLowerCase() + '\u2026';
 
-            var params = { personType: personType };
+            var params = {
+                startIndex: currentPage * PAGE_SIZE,
+                limit: PAGE_SIZE,
+                personType: personType,
+                sortBy: currentSort,
+                sortOrder: currentSort === 'name' ? 'ascending' : 'descending'
+            };
+            if (searchTerm.trim()) { params.searchTerm = searchTerm.trim(); }
             var libraryIds = getSelectedLibraryIds();
             if (libraryIds) { params.libraryIds = libraryIds; }
 
@@ -817,11 +890,19 @@
             fetch(url, { headers: { 'X-Emby-Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
                 .then(function(r){ if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); })
                 .then(function(result){
-                    allActors=(result&&result.actors)||[];
-                    refresh();
+                    if (requestId !== loadRequestId) { return; }
+                    actors=(result&&result.actors)||[];
+                    totalRecordCount=(result&&result.totalRecordCount)||0;
+                    var totalPages = Math.max(1, Math.ceil(totalRecordCount / PAGE_SIZE));
+                    if (currentPage >= totalPages && totalRecordCount > 0) {
+                        currentPage = totalPages - 1;
+                        loadData();
+                        return;
+                    }
+                    renderPage();
                     setGridOffset();
                 })
-                ['catch'](function(err){ statusEl.textContent='Error: '+err; });
+                ['catch'](function(err){ if(requestId===loadRequestId){statusEl.textContent='Error: '+err;} });
         }
 
         function initOnce() {

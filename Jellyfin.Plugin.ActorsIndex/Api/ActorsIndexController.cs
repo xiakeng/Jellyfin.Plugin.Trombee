@@ -6,8 +6,10 @@ using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trombee.Configuration;
+using Jellyfin.Plugin.Trombee.Persistence;
 using Jellyfin.Plugin.Trombee.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -21,10 +23,11 @@ namespace Jellyfin.Plugin.Trombee.Api;
 /// Simple API for Actors Index.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("Trombee")]
 public class ActorsIndexController : ControllerBase
 {
-    private const string PluginManifestUrl = "https://raw.githubusercontent.com/drbuju/Jellyfin.Plugin.Trombee/main/manifest.json";
+    private const string PluginManifestUrl = "https://raw.githubusercontent.com/xiakeng/Jellyfin.Plugin.Trombee/main/manifest.json";
 
     private readonly ActorsIndexService _actorsIndexService;
     private readonly ILibraryManager _libraryManager;
@@ -85,18 +88,20 @@ public class ActorsIndexController : ControllerBase
         {
             enabled = config.Enabled,
             minimumAppearances = config.MinimumAppearances,
-            showRoleName = config.ShowRoleName
+            showRoleName = config.ShowRoleName,
+            monitorLibraryChanges = config.MonitorLibraryChanges
         });
     }
 
     /// <summary>
     /// Returns the current service status.
     /// </summary>
-    /// <returns>A test payload from the service.</returns>
+    /// <param name="cancellationToken">A token that cancels the request.</param>
+    /// <returns>The persisted actors-index status.</returns>
     [HttpGet("service-status")]
-    public ActionResult<object> GetServiceStatus()
+    public async Task<ActionResult<ActorsIndexStatus>> GetServiceStatus(CancellationToken cancellationToken)
     {
-        return Ok(_actorsIndexService.GetStatus());
+        return Ok(await _actorsIndexService.GetStatusAsync(cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -125,11 +130,25 @@ public class ActorsIndexController : ControllerBase
     /// <summary>
     /// Returns the actors index with appearance counts.
     /// </summary>
+    /// <param name="startIndex">The zero-based result offset.</param>
+    /// <param name="limit">The page size, clamped to 1 through 200.</param>
+    /// <param name="searchTerm">An optional actor-name search.</param>
+    /// <param name="sortBy">The sort field: appearances or name.</param>
+    /// <param name="sortOrder">The sort direction: ascending/asc or descending/desc.</param>
     /// <param name="personType">The type of person to include (e.g. Actor, Director, Writer). Defaults to Actor.</param>
     /// <param name="libraryIds">Comma-separated list of library IDs to restrict results to. Omit for all accessible libraries.</param>
-    /// <returns>Sorted list of people with item occurrences.</returns>
+    /// <param name="cancellationToken">A token that cancels the request.</param>
+    /// <returns>A server-paged list of people with appearance counts.</returns>
     [HttpGet("actors-index")]
-    public ActionResult<object> GetActorsIndex([FromQuery] string? personType = null, [FromQuery] string? libraryIds = null)
+    public async Task<ActionResult<ActorsPage>> GetActorsIndex(
+        [FromQuery] int startIndex = 0,
+        [FromQuery] int limit = 60,
+        [FromQuery] string? searchTerm = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortOrder = null,
+        [FromQuery] string? personType = null,
+        [FromQuery] string? libraryIds = null,
+        CancellationToken cancellationToken = default)
     {
         var userId = User.GetUserId();
         var callingUser = userId != Guid.Empty ? _userManager.GetUserById(userId) : null;
@@ -140,18 +159,65 @@ public class ActorsIndexController : ControllerBase
             _ = Enum.TryParse(personType, ignoreCase: true, out personKind);
         }
 
-        Guid[]? parsedLibraryIds = null;
-        if (!string.IsNullOrEmpty(libraryIds))
+        var actorSortBy = string.Equals(sortBy, "name", StringComparison.OrdinalIgnoreCase)
+            ? ActorSortBy.Name
+            : ActorSortBy.Appearances;
+        var direction = string.Equals(sortOrder, "ascending", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sortOrder, "asc", StringComparison.OrdinalIgnoreCase)
+                ? SortDirection.Ascending
+                : SortDirection.Descending;
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var query = new ActorsQuery(
+            Math.Max(0, startIndex),
+            Math.Clamp(limit, 1, 200),
+            searchTerm,
+            actorSortBy,
+            direction,
+            personKind.ToString(),
+            ParseLibraryIds(libraryIds),
+            Math.Max(1, config.MinimumAppearances));
+        var page = await _actorsIndexService
+            .GetActorsIndexAsync(callingUser, query, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(page);
+    }
+
+    /// <summary>
+    /// Returns one actor's filmography from the persisted index.
+    /// </summary>
+    /// <param name="actorKey">The stable actor key returned by the actor index.</param>
+    /// <param name="startIndex">The zero-based result offset.</param>
+    /// <param name="limit">The page size, clamped to 1 through 200.</param>
+    /// <param name="personType">The Jellyfin person type.</param>
+    /// <param name="libraryIds">Optional comma-separated top-level library IDs.</param>
+    /// <param name="cancellationToken">A token that cancels the request.</param>
+    /// <returns>A server-paged filmography.</returns>
+    [HttpGet("actors/{actorKey}/items")]
+    public async Task<ActionResult<FilmographyPage>> GetActorItems(
+        string actorKey,
+        [FromQuery] int startIndex = 0,
+        [FromQuery] int limit = 60,
+        [FromQuery] string? personType = null,
+        [FromQuery] string? libraryIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = User.GetUserId();
+        var callingUser = userId != Guid.Empty ? _userManager.GetUserById(userId) : null;
+        var personKind = Jellyfin.Data.Enums.PersonKind.Actor;
+        if (!string.IsNullOrWhiteSpace(personType))
         {
-            parsedLibraryIds = libraryIds
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(id => Guid.TryParse(id, out var guid) ? guid : (Guid?)null)
-                .Where(id => id.HasValue)
-                .Select(id => id!.Value)
-                .ToArray();
+            _ = Enum.TryParse(personType, ignoreCase: true, out personKind);
         }
 
-        return Ok(_actorsIndexService.GetActorsIndex(callingUser, personKind, parsedLibraryIds));
+        var query = new FilmographyQuery(
+            Math.Max(0, startIndex),
+            Math.Clamp(limit, 1, 200),
+            personKind.ToString(),
+            ParseLibraryIds(libraryIds));
+        var page = await _actorsIndexService
+            .GetFilmographyAsync(callingUser, actorKey, query, cancellationToken)
+            .ConfigureAwait(false);
+        return Ok(page);
     }
 
     /// <summary>
@@ -199,7 +265,7 @@ public class ActorsIndexController : ControllerBase
                 imageUrl = (string?)null,
                 name = "Trombee",
                 overview = "Browse all actors in your library with appearance counts.",
-                owner = "drbuju",
+                owner = "xiakeng",
                 versions = new[]
                 {
                     new
@@ -245,8 +311,6 @@ public class ActorsIndexController : ControllerBase
         {
             _providerManager.QueueRefresh(person.Id, refreshOpts, RefreshPriority.Normal);
         }
-
-        ActorsIndexService.ClearCache();
 
         return Ok(new
         {
@@ -400,5 +464,18 @@ public class ActorsIndexController : ControllerBase
                 Directory.Delete(tempDir, recursive: true);
             }
         }
+    }
+
+    private static Guid[] ParseLibraryIds(string? libraryIds)
+    {
+        return string.IsNullOrWhiteSpace(libraryIds)
+            ? []
+            : libraryIds
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(id => Guid.TryParse(id, out var guid) ? guid : (Guid?)null)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToArray();
     }
 }

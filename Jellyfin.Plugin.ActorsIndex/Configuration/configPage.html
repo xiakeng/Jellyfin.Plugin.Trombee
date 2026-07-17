@@ -76,6 +76,16 @@
                         </div>
                     </div>
 
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="MonitorLibraryChanges" />
+                            <span>Monitor library changes</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">
+                            Update Trombee data immediately when Jellyfin items change.
+                        </div>
+                    </div>
+
                     <div>
                         <!-- is="emby-button" is required by the Jellyfin web framework -->
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
@@ -90,7 +100,7 @@
                         <h2 class="sectionTitle">Actor Images</h2>
                     </div>
                     <div class="verticalSection">
-                        <p>Forces Jellyfin to re-download images and metadata for every actor in your library, so the Trombee grid shows up-to-date photos. Also clears Trombee's internal cache (normally refreshed automatically every 10 minutes), so newly added content shows up immediately.</p>
+                        <p>Forces Jellyfin to re-download images and metadata for every actor in your library, so the Trombee grid shows up-to-date photos.</p>
                     </div>
                     <!-- is="emby-button" is required by the Jellyfin web framework -->
                     <button is="emby-button" type="button" id="RefreshPeopleBtn" class="raised emby-button">
@@ -145,7 +155,6 @@
                                 <tr>
                                     <th class="ai-th">Actor</th>
                                     <th class="ai-th ai-th--center">Appearances</th>
-                                    <th class="ai-th">Titles</th>
                                 </tr>
                             </thead>
                             <tbody id="ActorsIndexTableBody"></tbody>
@@ -193,6 +202,7 @@
                         document.getElementById('Enabled').checked = config.Enabled ?? true;
                         document.getElementById('MinimumAppearances').value = config.MinimumAppearances ?? 1;
                         document.getElementById('ShowRoleName').checked = config.ShowRoleName ?? true;
+                        document.getElementById('MonitorLibraryChanges').checked = config.MonitorLibraryChanges ?? true;
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -209,6 +219,7 @@
                     config.Enabled = document.getElementById('Enabled').checked;
                     config.MinimumAppearances = parseInt(document.getElementById('MinimumAppearances').value, 10) || 1;
                     config.ShowRoleName = document.getElementById('ShowRoleName').checked;
+                    config.MonitorLibraryChanges = document.getElementById('MonitorLibraryChanges').checked;
                     ApiClient.updatePluginConfiguration(ActorsIndexConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
@@ -363,30 +374,17 @@
                 tableBody.innerHTML = '';
 
                 ApiClient.ajax({
-                    url: ApiClient.getUrl('Trombee/actors-index'),
+                    url: ApiClient.getUrl('Trombee/actors-index', { startIndex: 0, limit: 60 }),
                     type: 'GET',
                     dataType: 'json'
                 }).then(function (result) {
-                    statusEl.textContent = 'Found ' + result.totalActors + ' actors.';
+                    statusEl.textContent = 'Showing ' + result.actors.length + ' of ' + result.totalRecordCount + ' actors.';
 
-                    var maxItems = 6;
                     result.actors.forEach(function (actor) {
-                        var shownItems = actor.items.slice(0, maxItems);
-                        var titlesHtml = shownItems.map(function (i) {
-                            var url = ApiClient.serverAddress() + '/web/index.html#/details?id=' + i.itemId;
-                            var label = escapeHtml(i.itemName) + (i.role ? ' <em>(' + escapeHtml(i.role) + ')</em>' : '');
-                            return '<a href="' + url + '" class="ai-link">' + label + '</a>';
-                        }).join(', ');
-
-                        if (actor.items.length > maxItems) {
-                            titlesHtml += '&nbsp;<em>\u2026 and ' + (actor.items.length - maxItems) + ' more</em>';
-                        }
-
                         var row = document.createElement('tr');
                         row.innerHTML =
                             '<td class="ai-td">' + escapeHtml(actor.name) + '</td>' +
-                            '<td class="ai-td--center">' + actor.appearances + '</td>' +
-                            '<td class="ai-td--small">' + titlesHtml + '</td>';
+                            '<td class="ai-td--center">' + actor.appearances + '</td>';
                         tableBody.appendChild(row);
                     });
 
