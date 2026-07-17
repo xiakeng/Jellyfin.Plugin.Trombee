@@ -6,6 +6,18 @@ Browse all the actors in your Jellyfin library on a single screen: a full grid w
 
 ![Trombee — actor detail](Jellyfin.Plugin.ActorsIndex/Images/screenshot-actor.jpg)
 
+## How This Fork Differs
+
+This fork keeps the original Trombee feature set while improving the experience and performance for large libraries:
+
+- **Better single-page experience** — smoother in-page navigation, stable browser history, actor detail transitions, and responsive paging.
+- **Persistent actor data** — derived actor data is stored in SQLite under Jellyfin's plugin data path instead of being rebuilt for page requests and held only in a short-lived memory cache.
+- **Server-side paging** — the browser requests pages with `startIndex` and `limit`, so it receives only the records needed for the current view.
+- **Background maintenance** — a daily incremental task, optional immediate library-change monitoring, and a manual full rebuild keep SQLite synchronized with Jellyfin.
+- **Large-library performance** — actor and filmography pages query indexed SQLite data instead of scanning the complete Jellyfin library at request time.
+
+Jellyfin remains the source of truth. The SQLite database contains disposable derived data and can be rebuilt at any time.
+
 ## Features
 
 - **Actors grid** — all actors/actresses, sortable by number of appearances or name A→Z, with photos

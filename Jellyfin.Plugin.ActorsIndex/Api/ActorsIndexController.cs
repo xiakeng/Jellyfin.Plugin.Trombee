@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.Trombee.Api;
 [Route("Trombee")]
 public class ActorsIndexController : ControllerBase
 {
-    private const string PluginManifestUrl = "https://raw.githubusercontent.com/drbuju/Jellyfin.Plugin.Trombee/main/manifest.json";
+    private const string PluginManifestUrl = "https://raw.githubusercontent.com/xiakeng/Jellyfin.Plugin.Trombee/main/manifest.json";
 
     private readonly ActorsIndexService _actorsIndexService;
     private readonly ILibraryManager _libraryManager;
@@ -265,7 +265,7 @@ public class ActorsIndexController : ControllerBase
                 imageUrl = (string?)null,
                 name = "Trombee",
                 overview = "Browse all actors in your library with appearance counts.",
-                owner = "drbuju",
+                owner = "xiakeng",
                 versions = new[]
                 {
                     new

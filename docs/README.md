@@ -24,7 +24,7 @@ flowchart TD
 
 ## Documentation Contract
 
-The completed guide set will:
+This guide set:
 
 - describe the deployed behavior represented by the current source, not a proposed future design;
 - name the concrete classes and files responsible for every documented flow;
