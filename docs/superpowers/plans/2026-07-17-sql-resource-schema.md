@@ -236,3 +236,74 @@ Confirm `jellyfin.exe` is stopped over SSH, copy the published DLL to `C:\Progra
 - [ ] **Step 4: Complete E2E verification**
 
 Verify persisted actor paging, filmography paging, scheduled-task visibility/history, schema hash storage, restart persistence, immediate library-change processing when enabled, and rendered desktop/mobile Trombee flows with the in-app Browser.
+
+### Task 6: Align Schema Names and Actor Lookup Indexes
+
+**Files:**
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableCredits.sql` to `credits.sql`
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableIndexGenerations.sql` to `index_generations.sql`
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableIndexState.sql` to `index_state.sql`
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableMediaItemLibraries.sql` to `media_item_libraries.sql`
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableMediaItems.sql` to `media_items.sql`
+- Rename: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/TableSchemaMetadata.sql` to `schema_metadata.sql`
+- Modify: `Jellyfin.Plugin.ActorsIndex/Persistence/Sql/Schemas/credits.sql`
+- Modify: `Jellyfin.Plugin.ActorsIndex/Persistence/SqliteActorsIndexStore.cs`
+- Test: `Jellyfin.Plugin.ActorsIndex.Tests/Persistence/EmbeddedSqlResourceProviderTests.cs`
+- Test: `Jellyfin.Plugin.ActorsIndex.Tests/Persistence/SqliteActorsIndexStoreTests.cs`
+- Test: invalid schema providers under `Jellyfin.Plugin.ActorsIndex.Tests`
+
+- [ ] **Step 1: Write failing schema contract tests**
+
+Change the resource-name assertion to the exact lowercase table names. Add a persistence test that reads `PRAGMA index_info('idx_credits_actor_query')` and expects:
+
+```text
+generation_id
+actor_key
+person_type
+source_item_id
+```
+
+Add a persistence test that completes a rebuild and asserts `sqlite_stat1` contains statistics for `credits` and `media_items`.
+
+- [ ] **Step 2: Run focused tests and verify RED**
+
+Run:
+
+```powershell
+dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~EmbeddedSqlResourceProviderTests|FullyQualifiedName~SchemaUsesFilmographyIndexOrder|FullyQualifiedName~CompletedRebuildUpdatesPlannerStatistics"
+```
+
+Expected: resource names retain the `Table` prefix, the actor index reports `person_type` before `actor_key`, and no `sqlite_stat1` statistics exist.
+
+- [ ] **Step 3: Rename schemas and correct the credits lookup index**
+
+Use table-name filenames exactly. Change the secondary credits index to:
+
+```sql
+CREATE INDEX idx_credits_actor_query
+    ON credits (generation_id, actor_key, person_type, source_item_id);
+```
+
+Keep all generation-leading primary keys unchanged. Update invalid-resource test providers to target `credits.sql`.
+
+- [ ] **Step 4: Maintain SQLite planner statistics after scheduled maintenance**
+
+After a full rebuild activates and after a daily incremental run completes, execute:
+
+```sql
+PRAGMA optimize=0x10002;
+```
+
+Run it on the existing writer connection after the state transaction commits, while the writer gate remains held. Do not run it for each live library event.
+
+- [ ] **Step 5: Run focused and full verification**
+
+Run:
+
+```powershell
+dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.csproj -c Release --no-restore
+dotnet build Jellyfin.Plugin.ActorsIndex.sln -c Release --no-restore
+git diff --check
+```
+
+Expected: all tests pass, build completes with zero warnings and errors, and the diff has no whitespace errors.
