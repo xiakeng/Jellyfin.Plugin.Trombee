@@ -8,6 +8,110 @@ namespace Jellyfin.Plugin.Trombee.Tests.Persistence;
 public sealed class SqliteActorsIndexStoreTests
 {
     [Fact]
+    public async Task SchemaUsesFilmographyIndexOrder()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "trombee-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "actors-index.db");
+
+        try
+        {
+            await using var store = new SqliteActorsIndexStore(databasePath);
+            await store.InitializeAsync(CancellationToken.None);
+
+            using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+            await connection.OpenAsync(CancellationToken.None);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT name FROM pragma_index_info('idx_credits_actor_query') ORDER BY seqno;";
+            using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+            var columns = new List<string>();
+            while (await reader.ReadAsync(CancellationToken.None))
+            {
+                columns.Add(reader.GetString(0));
+            }
+
+            Assert.Equal(
+                ["generation_id", "actor_key", "person_type", "source_item_id"],
+                columns);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RebuildActivationUpdatesPlannerStatistics()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "trombee-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "actors-index.db");
+
+        try
+        {
+            await using var store = new SqliteActorsIndexStore(databasePath);
+            await store.InitializeAsync(CancellationToken.None);
+            var generation = await store.BeginRebuildAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            await store.ReplaceItemsAsync(
+                generation,
+                [CreateMovie(Guid.NewGuid(), "Analyzed Movie", "analyzed", "Analyzed Actor")],
+                CancellationToken.None);
+
+            await store.ActivateRebuildAsync(generation, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            Assert.Equal(
+                ["credits", "media_items"],
+                await GetTablesWithPlannerStatisticsAsync(databasePath));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task IncrementalCompletionUpdatesPlannerStatistics()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "trombee-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "actors-index.db");
+
+        try
+        {
+            await using var store = new SqliteActorsIndexStore(databasePath);
+            await store.InitializeAsync(CancellationToken.None);
+            var generation = await store.BeginRebuildAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            await store.ReplaceItemsAsync(
+                generation,
+                [CreateMovie(Guid.NewGuid(), "Analyzed Movie", "analyzed", "Analyzed Actor")],
+                CancellationToken.None);
+            await store.ActivateRebuildAsync(generation, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+            {
+                await connection.OpenAsync(CancellationToken.None);
+                using var command = connection.CreateCommand();
+                command.CommandText =
+                    """
+                    DELETE FROM sqlite_stat1;
+                    ANALYZE sqlite_schema;
+                    """;
+                _ = await command.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+
+            await store.CompleteIncrementalAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            Assert.Equal(
+                ["credits", "media_items"],
+                await GetTablesWithPlannerStatisticsAsync(databasePath));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SchemaInitializationReportsCreationThenReuse()
     {
         var directory = Path.Combine(Path.GetTempPath(), "trombee-tests", Guid.NewGuid().ToString("N"));
@@ -512,6 +616,23 @@ public sealed class SqliteActorsIndexStoreTests
             [new IndexedCredit(actorKey, null, actorName, null, "Actor")]);
     }
 
+    private static async Task<IReadOnlyList<string>> GetTablesWithPlannerStatisticsAsync(string databasePath)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        await connection.OpenAsync(CancellationToken.None);
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT tbl FROM sqlite_stat1 WHERE tbl IN ('credits', 'media_items') GROUP BY tbl ORDER BY tbl;";
+        using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        var tables = new List<string>();
+        while (await reader.ReadAsync(CancellationToken.None))
+        {
+            tables.Add(reader.GetString(0));
+        }
+
+        return tables;
+    }
+
     private static IndexedMediaItem CreateDisplayItem(
         Guid sourceItemId,
         Guid displayItemId,
@@ -540,7 +661,7 @@ public sealed class SqliteActorsIndexStoreTests
         {
             _inner = inner;
             SchemaResources = inner.SchemaResources
-                .Select(resource => resource.Name == "TableCredits.sql"
+                .Select(resource => resource.Name == "credits.sql"
                     ? resource with { Content = "THIS IS NOT VALID SQL;" }
                     : resource)
                 .ToArray();

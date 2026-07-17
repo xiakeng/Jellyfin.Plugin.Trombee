@@ -13,12 +13,12 @@ public sealed class EmbeddedSqlResourceProviderTests
 
         Assert.Equal(
             [
-                "TableCredits.sql",
-                "TableIndexGenerations.sql",
-                "TableIndexState.sql",
-                "TableMediaItemLibraries.sql",
-                "TableMediaItems.sql",
-                "TableSchemaMetadata.sql"
+                "credits.sql",
+                "index_generations.sql",
+                "index_state.sql",
+                "media_item_libraries.sql",
+                "media_items.sql",
+                "schema_metadata.sql"
             ],
             provider.SchemaResources.Select(resource => resource.Name));
         Assert.Equal(64, provider.SchemaHash.Length);

@@ -46,7 +46,7 @@ public sealed class LibraryChangeMonitorServiceTests
         {
             _inner = inner;
             SchemaResources = inner.SchemaResources
-                .Select(resource => resource.Name == "TableCredits.sql"
+                .Select(resource => resource.Name == "credits.sql"
                     ? resource with { Content = "THIS IS NOT VALID SQL;" }
                     : resource)
                 .ToArray();

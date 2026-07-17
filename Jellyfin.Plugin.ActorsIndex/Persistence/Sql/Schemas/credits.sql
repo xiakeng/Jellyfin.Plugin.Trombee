@@ -12,4 +12,4 @@ CREATE TABLE credits (
 );
 
 CREATE INDEX idx_credits_actor_query
-    ON credits (generation_id, person_type, actor_key, source_item_id);
+    ON credits (generation_id, actor_key, person_type, source_item_id);

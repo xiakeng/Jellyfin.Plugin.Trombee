@@ -252,7 +252,7 @@ Verify persisted actor paging, filmography paging, scheduled-task visibility/his
 - Test: `Jellyfin.Plugin.ActorsIndex.Tests/Persistence/SqliteActorsIndexStoreTests.cs`
 - Test: invalid schema providers under `Jellyfin.Plugin.ActorsIndex.Tests`
 
-- [ ] **Step 1: Write failing schema contract tests**
+- [x] **Step 1: Write failing schema contract tests**
 
 Change the resource-name assertion to the exact lowercase table names. Add a persistence test that reads `PRAGMA index_info('idx_credits_actor_query')` and expects:
 
@@ -265,7 +265,7 @@ source_item_id
 
 Add a persistence test that completes a rebuild and asserts `sqlite_stat1` contains statistics for `credits` and `media_items`.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -275,7 +275,7 @@ dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.
 
 Expected: resource names retain the `Table` prefix, the actor index reports `person_type` before `actor_key`, and no `sqlite_stat1` statistics exist.
 
-- [ ] **Step 3: Rename schemas and correct the credits lookup index**
+- [x] **Step 3: Rename schemas and correct the credits lookup index**
 
 Use table-name filenames exactly. Change the secondary credits index to:
 
@@ -286,7 +286,7 @@ CREATE INDEX idx_credits_actor_query
 
 Keep all generation-leading primary keys unchanged. Update invalid-resource test providers to target `credits.sql`.
 
-- [ ] **Step 4: Maintain SQLite planner statistics after scheduled maintenance**
+- [x] **Step 4: Maintain SQLite planner statistics after scheduled maintenance**
 
 After a full rebuild activates and after a daily incremental run completes, execute:
 
@@ -296,7 +296,7 @@ PRAGMA optimize=0x10002;
 
 Run it on the existing writer connection after the state transaction commits, while the writer gate remains held. Do not run it for each live library event.
 
-- [ ] **Step 5: Run focused and full verification**
+- [x] **Step 5: Run focused and full verification**
 
 Run:
 

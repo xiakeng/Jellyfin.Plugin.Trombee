@@ -251,6 +251,8 @@ public sealed class SqliteActorsIndexStore : IAsyncDisposable
                 _ = await cleanupCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            await OptimizeAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -372,6 +374,8 @@ public sealed class SqliteActorsIndexStore : IAsyncDisposable
             {
                 throw new InvalidOperationException("An active generation is required for incremental maintenance.");
             }
+
+            await OptimizeAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -845,6 +849,13 @@ public sealed class SqliteActorsIndexStore : IAsyncDisposable
         return result is null || result == DBNull.Value
             ? null
             : Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task OptimizeAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA optimize=0x10002;";
+        _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)

@@ -9,12 +9,12 @@ Refactor Trombee's plugin-owned SQLite implementation so schema definitions and 
 ```text
 Persistence/Sql/
   Schemas/
-    TableSchemaMetadata.sql
-    TableIndexGenerations.sql
-    TableIndexState.sql
-    TableMediaItems.sql
-    TableMediaItemLibraries.sql
-    TableCredits.sql
+    credits.sql
+    index_generations.sql
+    index_state.sql
+    media_item_libraries.sql
+    media_items.sql
+    schema_metadata.sql
   Queries/
     QueryActorsCount.sql
     QueryActorsPage.sql
@@ -22,7 +22,7 @@ Persistence/Sql/
     QueryFilmographyPage.sql
 ```
 
-Each `Table*.sql` file owns one table, its constraints, and its related indexes. Foreign keys are declared by the child table that owns the constraint. Schema resources are loaded in deterministic ordinal filename order.
+Each schema file has the same name as its table and owns that table, its constraints, and its related indexes. Foreign keys are declared by the child table that owns the constraint. Schema resources are loaded in deterministic ordinal filename order.
 
 Each query resource is a complete independently executable SQL command. The count and page commands intentionally repeat their filtering CTEs. The store will not concatenate shared SQL fragments at runtime. Simple single-table CRUD statements and temporary filter-table operations remain inline in C#.
 
@@ -38,7 +38,7 @@ SQLite application-defined functions are not used. `Microsoft.Data.Sqlite` funct
 
 The plugin calculates one SHA-256 hash for the entire schema set. It sorts schema resources by ordinal logical name, normalizes line endings, and hashes each filename and content into one deterministic composite value.
 
-`TableSchemaMetadata.sql` creates a singleton metadata table that stores the composite hash used to create the database. The metadata table is itself part of the hashed schema set.
+`schema_metadata.sql` creates a singleton metadata table that stores the composite hash used to create the database. The metadata table is itself part of the hashed schema set.
 
 ## Initialization and Replacement
 
@@ -68,12 +68,18 @@ This programmatic execution preserves Jellyfin scheduled-task progress, cancella
 
 The existing parameter binding methods remain in C# and are shared by each count/page pair, keeping their parameter contracts consistent.
 
+The credits query index is ordered `(generation_id, actor_key, person_type, source_item_id)`. Filmography queries can therefore seek directly on the active generation and actor key, while actor-list queries can still scan only the active generation. Generation-leading primary keys remain responsible for snapshot coexistence, parent-child joins, reconciliation, and cascade cleanup.
+
+After successful full-rebuild activation and daily incremental completion, the store runs `PRAGMA optimize=0x10002`. This gives SQLite current planner statistics after substantial scheduled changes without adding optimization work to each live library event.
+
 ## Verification
 
 Automated tests will cover:
 
 - deterministic loading and one composite hash for all schema resources;
+- exact table-name schema resource filenames;
 - creation of every table, constraint, and index from embedded schema files;
+- the filmography-oriented credits index column order and planner statistics maintenance;
 - reuse of a database whose schema hash matches;
 - automatic rebuild queuing for a missing database;
 - temporary replacement and rebuild queuing for a missing or changed hash;
