@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -164,18 +165,58 @@ jobs:
           print(f"manifest.json updated: v$PVER  targetAbi={target_abi}")
           PYEOF
 
-      # ── Commit & push all changes ────────────────────────────────────────
-      - name: Commit and push
+      # ── Commit generated changes to a release branch ────────────────────
+      - name: Commit generated release changes
         if: steps.guard.outputs.skip == 'false' && steps.check.outputs.exists == 'false'
+        id: release_commit
         run: |
+          PVER="${{ steps.newver.outputs.version }}"
+          BRANCH="auto-release/v${PVER}"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
           git add \
             Jellyfin.Plugin.ActorsIndex/Jellyfin.Plugin.ActorsIndex.csproj \
             Jellyfin.Plugin.ActorsIndex/meta.json \
             manifest.json
-          git commit -m "Auto-release v${{ steps.newver.outputs.version }} for Jellyfin ${{ steps.versions.outputs.jellyfin }}"
-          git push
+          git commit -m "Auto-release v${PVER} for Jellyfin ${{ steps.versions.outputs.jellyfin }}"
+
+          REMOTE_SHA=$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')
+          if [[ -n "$REMOTE_SHA" ]]; then
+            git push --force-with-lease="refs/heads/${BRANCH}:${REMOTE_SHA}" --set-upstream origin "$BRANCH"
+          else
+            git push --set-upstream origin "$BRANCH"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      # ── Merge generated changes through protected main ──────────────────
+      - name: Create and merge release pull request
+        if: steps.guard.outputs.skip == 'false' && steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.release_commit.outputs.branch }}
+          PVER: ${{ steps.newver.outputs.version }}
+          JVER: ${{ steps.versions.outputs.jellyfin }}
+        run: |
+          PR_URL=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$BRANCH" \
+            --state open \
+            --json url \
+            --jq '.[0].url')
+
+          if [[ -z "$PR_URL" ]]; then
+            PR_URL=$(gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BRANCH" \
+              --title "[auto-release] v${PVER} for Jellyfin ${JVER}" \
+              --body "Automated release metadata and manifest update for Trombee v${PVER}.")
+          fi
+
+          echo "Merging release pull request: $PR_URL"
+          gh pr merge "$PR_URL" --merge --delete-branch
 
       # ── GitHub Release ───────────────────────────────────────────────────
       - name: Create GitHub Release
@@ -187,6 +228,7 @@ jobs:
           JVER="${{ steps.versions.outputs.jellyfin }}"
           NOTES="Automatic release built for Jellyfin **${JVER}**.\n\nInstallable directly from the plugin's settings page → *Plugin Update* → **Check for updates**."
           gh release create "v${PVER}" "${{ steps.package.outputs.zip }}" \
+            --target main \
             --title "v${PVER} — Jellyfin ${JVER}" \
             --notes "${NOTES}" \
             --latest
