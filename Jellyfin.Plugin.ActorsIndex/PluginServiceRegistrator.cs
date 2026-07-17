@@ -28,6 +28,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
         serviceCollection.AddSingleton<IActorsIndexSource, JellyfinActorsIndexSource>();
         serviceCollection.AddSingleton<IActorsIndexMaintenanceService, ActorsIndexMaintenanceService>();
+        serviceCollection.AddSingleton<IScheduledTask, ActorsIndexBootstrapTask>();
         serviceCollection.AddSingleton<IScheduledTask, UpdateActorsIndexTask>();
         serviceCollection.AddSingleton<IScheduledTask, RebuildActorsIndexTask>();
         serviceCollection.AddSingleton<ActorsIndexService>();

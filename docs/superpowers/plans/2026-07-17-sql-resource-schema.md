@@ -319,11 +319,11 @@ This task supersedes Task 3's application-lifetime queue coordination after runt
 - Modify: `Jellyfin.Plugin.ActorsIndex.Tests/Tasks/ActorsIndexScheduledTaskTests.cs`
 - Modify: `Jellyfin.Plugin.ActorsIndex.Tests/Services/ActorsIndexInitializationServiceTests.cs`
 
-- [ ] **Step 1: Write failing hidden-task lifecycle tests**
+- [x] **Step 1: Write failing hidden-task lifecycle tests**
 
 Add tests that require `ActorsIndexBootstrapTask` to implement `IConfigurableScheduledTask`, remain hidden, and expose exactly one `StartupTrigger`. With a real temporary SQLite store, verify that execution queues `RebuildActorsIndexTask` when `active_generation` is null and does not queue it after a rebuild generation is activated. Replace initialization-service queue tests with a focused test proving that the hosted service creates the schema without depending on application-lifetime or task-manager timing.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -333,7 +333,7 @@ dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.
 
 Expected: compilation fails because `ActorsIndexBootstrapTask` does not exist and the initialization-service constructor still requires `ITaskManager` and `IHostApplicationLifetime`.
 
-- [ ] **Step 3: Implement native startup coordination**
+- [x] **Step 3: Implement native startup coordination**
 
 Create the hidden task with these scheduling properties:
 
@@ -352,7 +352,7 @@ Its `ExecuteAsync` method must call `SqliteActorsIndexStore.HasActiveGenerationA
 
 Remove `IHostApplicationLifetime`, `ITaskManager`, the application-start callback, polling interval, timeout, and background queue task from `ActorsIndexInitializationService`. Keep database initialization and failure logging. Register the hidden task as an `IScheduledTask` while leaving `RebuildActorsIndexTask.GetDefaultTriggers()` empty.
 
-- [ ] **Step 4: Run focused and full verification**
+- [x] **Step 4: Run focused and full verification**
 
 Run:
 

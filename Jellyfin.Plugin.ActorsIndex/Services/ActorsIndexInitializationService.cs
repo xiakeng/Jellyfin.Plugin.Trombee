@@ -1,23 +1,17 @@
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trombee.Persistence;
-using Jellyfin.Plugin.Trombee.Tasks;
-using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Trombee.Services;
 
 /// <summary>
-/// Initializes the actors-index database and queues its initial rebuild.
+/// Initializes the actors-index database.
 /// </summary>
 public sealed class ActorsIndexInitializationService : IHostedService
 {
-    private static readonly TimeSpan _taskRegistrationPollInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan _taskRegistrationTimeout = TimeSpan.FromSeconds(30);
-
     private static readonly Action<ILogger, SchemaInitializationResult, Exception?> _logSchemaInitialized =
         LoggerMessage.Define<SchemaInitializationResult>(
             LogLevel.Information,
@@ -29,39 +23,19 @@ public sealed class ActorsIndexInitializationService : IHostedService
         new EventId(5, "ActorsIndexSchemaInitializationFailed"),
         "Failed to initialize the Trombee actors-index database");
 
-    private static readonly Action<ILogger, Exception?> _logRebuildQueued = LoggerMessage.Define(
-        LogLevel.Information,
-        new EventId(6, "ActorsIndexInitialRebuildQueued"),
-        "Queued the Trombee full actors-index rebuild after schema creation");
-
-    private static readonly Action<ILogger, Exception?> _logRebuildQueueFailed = LoggerMessage.Define(
-        LogLevel.Error,
-        new EventId(7, "ActorsIndexInitialRebuildQueueFailed"),
-        "Failed to queue the Trombee full actors-index rebuild");
-
     private readonly SqliteActorsIndexStore _store;
-    private readonly ITaskManager _taskManager;
-    private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger<ActorsIndexInitializationService> _logger;
-    private CancellationTokenRegistration _applicationStartedRegistration;
-    private Task _queueRebuildTask = Task.CompletedTask;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ActorsIndexInitializationService"/> class.
     /// </summary>
     /// <param name="store">The durable actors-index store.</param>
-    /// <param name="taskManager">The Jellyfin scheduled-task manager.</param>
-    /// <param name="applicationLifetime">The Jellyfin host lifetime.</param>
     /// <param name="logger">The logger.</param>
     public ActorsIndexInitializationService(
         SqliteActorsIndexStore store,
-        ITaskManager taskManager,
-        IHostApplicationLifetime applicationLifetime,
         ILogger<ActorsIndexInitializationService> logger)
     {
         _store = store;
-        _taskManager = taskManager;
-        _applicationLifetime = applicationLifetime;
         _logger = logger;
     }
 
@@ -80,49 +54,11 @@ public sealed class ActorsIndexInitializationService : IHostedService
         }
 
         _logSchemaInitialized(_logger, result, null);
-        if (result is SchemaInitializationResult.Created or SchemaInitializationResult.Recreated)
-        {
-            _applicationStartedRegistration = _applicationLifetime.ApplicationStarted.Register(
-                () => _queueRebuildTask = QueueRebuildWhenRegisteredAsync(_applicationLifetime.ApplicationStopping));
-        }
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public Task StopAsync(CancellationToken cancellationToken)
     {
-        await _applicationStartedRegistration.DisposeAsync().ConfigureAwait(false);
-        _applicationStartedRegistration = default;
-        await _queueRebuildTask.WaitAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task QueueRebuildWhenRegisteredAsync(CancellationToken stoppingToken)
-    {
-        using var timeoutTokenSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        timeoutTokenSource.CancelAfter(_taskRegistrationTimeout);
-        try
-        {
-            while (!_taskManager.ScheduledTasks.Any(
-                worker => worker.ScheduledTask is RebuildActorsIndexTask))
-            {
-                await Task.Delay(_taskRegistrationPollInterval, timeoutTokenSource.Token).ConfigureAwait(false);
-            }
-
-            _taskManager.QueueIfNotRunning<RebuildActorsIndexTask>();
-            _logRebuildQueued(_logger, null);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // Jellyfin is stopping before scheduled-task registration completed.
-        }
-        catch (OperationCanceledException ex)
-        {
-            _logRebuildQueueFailed(
-                _logger,
-                new TimeoutException("Timed out waiting for the Trombee rebuild task to register.", ex));
-        }
-        catch (Exception ex)
-        {
-            _logRebuildQueueFailed(_logger, ex);
-        }
+        return Task.CompletedTask;
     }
 }
