@@ -307,3 +307,60 @@ git diff --check
 ```
 
 Expected: all tests pass, build completes with zero warnings and errors, and the diff has no whitespace errors.
+
+### Task 7: Replace Startup Polling with a Hidden Bootstrap Task
+
+This task supersedes Task 3's application-lifetime queue coordination after runtime testing exposed Jellyfin's scheduled-task registration order.
+
+**Files:**
+- Create: `Jellyfin.Plugin.ActorsIndex/Tasks/ActorsIndexBootstrapTask.cs`
+- Modify: `Jellyfin.Plugin.ActorsIndex/Services/ActorsIndexInitializationService.cs`
+- Modify: `Jellyfin.Plugin.ActorsIndex/PluginServiceRegistrator.cs`
+- Modify: `Jellyfin.Plugin.ActorsIndex.Tests/Tasks/ActorsIndexScheduledTaskTests.cs`
+- Modify: `Jellyfin.Plugin.ActorsIndex.Tests/Services/ActorsIndexInitializationServiceTests.cs`
+
+- [ ] **Step 1: Write failing hidden-task lifecycle tests**
+
+Add tests that require `ActorsIndexBootstrapTask` to implement `IConfigurableScheduledTask`, remain hidden, and expose exactly one `StartupTrigger`. With a real temporary SQLite store, verify that execution queues `RebuildActorsIndexTask` when `active_generation` is null and does not queue it after a rebuild generation is activated. Replace initialization-service queue tests with a focused test proving that the hosted service creates the schema without depending on application-lifetime or task-manager timing.
+
+- [ ] **Step 2: Run focused tests and verify RED**
+
+Run:
+
+```powershell
+dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~ActorsIndexInitializationServiceTests|FullyQualifiedName~ActorsIndexScheduledTaskTests"
+```
+
+Expected: compilation fails because `ActorsIndexBootstrapTask` does not exist and the initialization-service constructor still requires `ITaskManager` and `IHostApplicationLifetime`.
+
+- [ ] **Step 3: Implement native startup coordination**
+
+Create the hidden task with these scheduling properties:
+
+```csharp
+public bool IsHidden => true;
+public bool IsEnabled => true;
+public bool IsLogged => true;
+
+public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+{
+    return [new TaskTriggerInfo { Type = TaskTriggerInfoType.StartupTrigger }];
+}
+```
+
+Its `ExecuteAsync` method must call `SqliteActorsIndexStore.HasActiveGenerationAsync`. When the result is false, queue `RebuildActorsIndexTask` through `ITaskManager.QueueIfNotRunning`; otherwise return without queueing. Keep the readiness decision durable by deriving it from SQLite rather than process memory.
+
+Remove `IHostApplicationLifetime`, `ITaskManager`, the application-start callback, polling interval, timeout, and background queue task from `ActorsIndexInitializationService`. Keep database initialization and failure logging. Register the hidden task as an `IScheduledTask` while leaving `RebuildActorsIndexTask.GetDefaultTriggers()` empty.
+
+- [ ] **Step 4: Run focused and full verification**
+
+Run:
+
+```powershell
+dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~ActorsIndexInitializationServiceTests|FullyQualifiedName~ActorsIndexScheduledTaskTests"
+dotnet test Jellyfin.Plugin.ActorsIndex.Tests\Jellyfin.Plugin.ActorsIndex.Tests.csproj -c Release --no-restore
+dotnet build Jellyfin.Plugin.ActorsIndex.sln -c Release --no-restore
+git diff --check
+```
+
+Expected: all tests pass, the build has zero warnings and errors, and no whitespace errors are reported.

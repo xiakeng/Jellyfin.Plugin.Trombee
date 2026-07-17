@@ -56,9 +56,11 @@ The current in-code-schema database has no schema metadata. On the first deploym
 
 ## Automatic Rebuild
 
-A startup coordinator initializes the store before the library-change monitor begins accepting events. After Jellyfin finishes starting, the coordinator uses `ITaskManager.QueueIfNotRunning<RebuildActorsIndexTask>()` when initialization returned either `Created` or `Recreated`.
+A startup coordinator initializes the store before the library-change monitor begins accepting events. It does not queue scheduled tasks because Jellyfin signals `ApplicationStarted` before it registers plugin scheduled-task workers.
 
-This programmatic execution preserves Jellyfin scheduled-task progress, cancellation, logging, and history. `RebuildActorsIndexTask.GetDefaultTriggers()` remains empty, so no recurring trigger is added. A matching existing schema does not queue a rebuild.
+A hidden `ActorsIndexBootstrapTask` uses Jellyfin's native startup trigger. When it runs, all scheduled-task workers have been registered. The task checks the durable `index_state.active_generation` value and calls `ITaskManager.QueueIfNotRunning<RebuildActorsIndexTask>()` only when no active generation exists. This covers new and recreated databases and retries automatically if Jellyfin stops before the first rebuild activates a generation.
+
+The bootstrap task implements `IConfigurableScheduledTask` with `IsHidden` enabled, so it does not add an administrator-facing task. The visible `RebuildActorsIndexTask.GetDefaultTriggers()` remains empty and therefore remains manual-only outside the automatic database-bootstrap condition. Programmatic execution preserves Jellyfin scheduled-task progress, cancellation, logging, and history. An existing database with an active generation performs only the single-row readiness check.
 
 ## Query Behavior
 
@@ -81,10 +83,11 @@ Automated tests will cover:
 - creation of every table, constraint, and index from embedded schema files;
 - the filmography-oriented credits index column order and planner statistics maintenance;
 - reuse of a database whose schema hash matches;
-- automatic rebuild queuing for a missing database;
+- hidden startup-task registration and its native startup trigger;
+- automatic rebuild queuing when no active generation exists;
+- no rebuild queue when an active generation exists;
 - temporary replacement and rebuild queuing for a missing or changed hash;
 - preservation of the existing database when replacement creation fails;
-- no rebuild queue for an unchanged schema;
 - loading each complex query from its own resource;
 - existing actor and filmography filtering, permission, sorting, counting, and paging behavior;
 - the full rebuild task retaining no default triggers.
