@@ -154,12 +154,7 @@ public sealed class JellyfinActorsIndexSource : IActorsIndexSource
         var credits = _libraryManager
             .GetPeople(item)
             .Where(person => !string.IsNullOrWhiteSpace(person.Name))
-            .Select(person => new IndexedCredit(
-                CreateActorKey(person),
-                person.Id == Guid.Empty ? null : person.Id,
-                person.Name!,
-                person.Role,
-                person.Type.ToString()))
+            .Select(CreateIndexedCredit)
             .ToArray();
 
         return new IndexedMediaItem(
@@ -171,5 +166,22 @@ public sealed class JellyfinActorsIndexSource : IActorsIndexSource
             new DateTimeOffset(item.DateLastSaved.ToUniversalTime()),
             libraryIds,
             credits);
+    }
+
+    private IndexedCredit CreateIndexedCredit(PersonInfo person)
+    {
+        var personItem = _libraryManager.GetPerson(person.Name!);
+        Guid? personItemId = personItem?.Id;
+        if (personItemId == Guid.Empty)
+        {
+            personItemId = null;
+        }
+
+        return new IndexedCredit(
+            personItemId?.ToString("N", CultureInfo.InvariantCulture) ?? CreateActorKey(person),
+            personItemId,
+            person.Name!,
+            person.Role,
+            person.Type.ToString());
     }
 }

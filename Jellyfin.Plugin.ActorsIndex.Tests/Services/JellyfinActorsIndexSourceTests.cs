@@ -52,11 +52,12 @@ public sealed class JellyfinActorsIndexSourceTests
     }
 
     [Fact]
-    public async Task EpisodeUsesSeriesAsDisplayItemAndPersonIdAsActorKey()
+    public async Task EpisodeUsesSeriesAsDisplayItemAndPersonItemIdAsActorKey()
     {
         var episodeId = Guid.NewGuid();
         var seriesId = Guid.NewGuid();
-        var personId = Guid.NewGuid();
+        var peopleRowId = Guid.NewGuid();
+        var personItemId = Guid.NewGuid();
         var episode = new Episode
         {
             Id = episodeId,
@@ -86,12 +87,19 @@ public sealed class JellyfinActorsIndexSourceTests
             [
                 new PersonInfo
                 {
-                    Id = personId,
+                    Id = peopleRowId,
                     Name = "Jane Doe",
                     Role = "Lead",
                     Type = PersonKind.Actor
                 }
             ]);
+        libraryManager
+            .Setup(manager => manager.GetPerson("Jane Doe"))
+            .Returns(new Person
+            {
+                Id = personItemId,
+                Name = "Jane Doe"
+            });
         var source = new JellyfinActorsIndexSource(libraryManager.Object);
 
         var results = new List<IndexedMediaItem>();
@@ -106,7 +114,51 @@ public sealed class JellyfinActorsIndexSourceTests
         Assert.Equal("Indexed Series", indexedItem.Name);
         Assert.Equal(2025, indexedItem.Year);
         var credit = Assert.Single(indexedItem.Credits);
-        Assert.Equal(personId.ToString("N"), credit.ActorKey);
-        Assert.Equal(personId, credit.PersonId);
+        Assert.Equal(personItemId.ToString("N"), credit.ActorKey);
+        Assert.Equal(personItemId, credit.PersonId);
+    }
+
+    [Fact]
+    public async Task UnresolvedPersonKeepsStableActorKeyWithoutInvalidPersonItemId()
+    {
+        var movie = new MediaBrowser.Controller.Entities.Movies.Movie
+        {
+            Id = Guid.NewGuid(),
+            Name = "Indexed Movie"
+        };
+        var peopleRowId = Guid.NewGuid();
+        var libraryManager = new Mock<ILibraryManager>(MockBehavior.Strict);
+        libraryManager
+            .Setup(manager => manager.GetItemList(It.IsAny<InternalItemsQuery>()))
+            .Returns([movie]);
+        libraryManager
+            .Setup(manager => manager.GetCollectionFolders(movie))
+            .Returns([]);
+        libraryManager
+            .Setup(manager => manager.GetPeople(movie))
+            .Returns(
+            [
+                new PersonInfo
+                {
+                    Id = peopleRowId,
+                    Name = "Unresolved Person",
+                    Role = "Lead",
+                    Type = PersonKind.Actor
+                }
+            ]);
+        libraryManager
+            .Setup(manager => manager.GetPerson("Unresolved Person"))
+            .Returns((Person?)null);
+        var source = new JellyfinActorsIndexSource(libraryManager.Object);
+
+        var results = new List<IndexedMediaItem>();
+        await foreach (var item in source.GetItemsAsync(null, CancellationToken.None))
+        {
+            results.Add(item);
+        }
+
+        var credit = Assert.Single(Assert.Single(results).Credits);
+        Assert.Equal(peopleRowId.ToString("N"), credit.ActorKey);
+        Assert.Null(credit.PersonId);
     }
 }
