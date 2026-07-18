@@ -9,6 +9,14 @@
     "owner": "drbuju",
     "versions": [
       {
+        "version": "1.1.0.3",
+        "changelog": "Auto-release: built for Jellyfin 10.11.8.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/xiakeng/Jellyfin.Plugin.Trombee/releases/download/v1.1.0.3/Jellyfin.Plugin.Trombee_1.1.0.3.zip",
+        "checksum": "578492ed6b148ded586e3e75262d2b13",
+        "timestamp": "2026-07-18T16:11:42Z"
+      },
+      {
         "version": "1.1.0.1",
         "changelog": "Auto-release: built for Jellyfin 10.11.8.",
         "targetAbi": "10.11.0.0",
