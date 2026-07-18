@@ -520,7 +520,6 @@
             actors.forEach(function(a){ frag.appendChild(makeCard(a)); });
             grid.appendChild(frag);
             updatePager();
-            scrollToTop();
         }
         function refresh() {
             currentPage = 0;
@@ -677,16 +676,17 @@
             var compact = window.matchMedia('(max-width: 767px), (max-width: 1023px) and (max-height: 767px)').matches;
             var appHeader = document.querySelector('.skinHeader');
             var appHeaderBottom = appHeader ? appHeader.getBoundingClientRect().bottom : 0;
+            var gridMarginTop = parseFloat(window.getComputedStyle(grid).marginTop) || 0;
             hdr.style.marginTop = '0px';
-            grid.style.marginTop = '0px';
             if (compact) {
                 hdr.style.top = '';
+                grid.style.marginTop = '0px';
                 // offsetTop is unaffected by Jellyfin's SPA page-transition transforms.
                 hdr.style.marginTop = (Math.ceil(appHeaderBottom - hdr.offsetTop) - 1) + 'px';
                 return;
             }
             hdr.style.top = (Math.ceil(appHeaderBottom) - 1) + 'px';
-            var gridTop = grid.getBoundingClientRect().top;
+            var gridTop = grid.getBoundingClientRect().top + window.scrollY - gridMarginTop;
             var headerBottom = hdr.getBoundingClientRect().bottom;
             grid.style.marginTop = Math.max(0, Math.ceil(headerBottom - gridTop)) + 'px';
         }
@@ -901,6 +901,7 @@
                     }
                     renderPage();
                     setGridOffset();
+                    scrollToTop();
                 })
                 ['catch'](function(err){ if(requestId===loadRequestId){statusEl.textContent='Error: '+err;} });
         }
