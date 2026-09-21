@@ -17,9 +17,11 @@
     .skinHeader .pageTitle.ab-trombee-page-title .ab-trombee-title-icon { font-size: 1.1em; line-height: 1; }
     #ab-compact-title { display: none; }
     #ab-header {
-        text-align: center; padding: 12px 16px 10px; position: fixed; top: 60px;
-        left: 0; right: 0; z-index: 150; background: #111; border-bottom: 1px solid #242424;
+        text-align: center; padding: 12px 16px 10px; position: sticky;
+        top: var(--ab-app-header-bottom, 60px); left: 0; right: 0; z-index: 150;
+        background: #111; border-bottom: 1px solid #242424;
     }
+    #ab-page { padding-top: var(--ab-app-header-bottom, 60px); }
 
     /* Search + pagination row */
     #ab-search-row {
@@ -84,7 +86,7 @@
     /* Grid */
     #ab-grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-        gap: 12px; padding: 14px 16px 32px; margin-top: 220px; /* fallback, overridden by JS */
+        gap: 12px; padding: 14px 16px 32px;
     }
     #ab-page .ab-card { min-width: 0; background: #1c1c1c; border-radius: 6px; overflow: hidden; cursor: pointer; border: 2px solid transparent; outline: none; }
     #ab-page .ab-card:hover, #ab-page .ab-card:focus { border-color: #0097e6; }
@@ -669,26 +671,15 @@
             if (isModalHistoryState(window.history.state)) { removeModalHistory(); }
         }
 
+        // Exposes the fixed Jellyfin header height so Trombee can flow beneath it
+        // instead of overlapping Jellyfin 12.1's top navigation.
         function setGridOffset() {
-            var hdr = document.getElementById('ab-header');
-            var grid = document.getElementById('ab-grid');
-            if (!hdr || !grid) { return; }
-            var compact = window.matchMedia('(max-width: 767px), (max-width: 1023px) and (max-height: 767px)').matches;
             var appHeader = document.querySelector('.skinHeader');
-            var appHeaderBottom = appHeader ? appHeader.getBoundingClientRect().bottom : 0;
-            var gridMarginTop = parseFloat(window.getComputedStyle(grid).marginTop) || 0;
-            hdr.style.marginTop = '0px';
-            if (compact) {
-                hdr.style.top = '';
-                grid.style.marginTop = '0px';
-                // offsetTop is unaffected by Jellyfin's SPA page-transition transforms.
-                hdr.style.marginTop = (Math.ceil(appHeaderBottom - hdr.offsetTop) - 1) + 'px';
-                return;
+            var offset = 0;
+            if (appHeader && window.getComputedStyle(appHeader).position === 'fixed') {
+                offset = Math.max(0, Math.ceil(appHeader.getBoundingClientRect().bottom));
             }
-            hdr.style.top = (Math.ceil(appHeaderBottom) - 1) + 'px';
-            var gridTop = grid.getBoundingClientRect().top + window.scrollY - gridMarginTop;
-            var headerBottom = hdr.getBoundingClientRect().bottom;
-            grid.style.marginTop = Math.max(0, Math.ceil(headerBottom - gridTop)) + 'px';
+            document.documentElement.style.setProperty('--ab-app-header-bottom', offset + 'px');
         }
 
         function init() {
