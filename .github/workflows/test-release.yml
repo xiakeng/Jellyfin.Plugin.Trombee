@@ -117,7 +117,7 @@ jobs:
         id: package
         run: |
           PVER="${{ steps.newver.outputs.version }}"
-          OUT="Jellyfin.Plugin.ActorsIndex/bin/Release/net9.0/publish"
+          OUT="Jellyfin.Plugin.ActorsIndex/bin/Release/net10.0/publish"
           ZIP="Jellyfin.Plugin.Trombee-test_${PVER}.zip"
           zip -j "$ZIP" "$OUT/Jellyfin.Plugin.Trombee.dll" "$OUT/meta.json" "$OUT/thumb.png"
           MD5=$(md5sum "$ZIP" | cut -d' ' -f1)

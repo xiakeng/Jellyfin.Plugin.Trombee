@@ -33,8 +33,8 @@ Jellyfin remains the source of truth. The SQLite database contains disposable de
 
 ## Requirements
 
-- Jellyfin **10.11.x** or later
-- .NET 9 (included in Jellyfin 10.11+)
+- Jellyfin **12.1.x** or later
+- .NET 10 (included in Jellyfin 12.1+)
 
 ## Installation
 
@@ -127,7 +127,7 @@ cd Jellyfin.Plugin.ActorsIndex
 dotnet publish --configuration=Release Jellyfin.Plugin.ActorsIndex.sln
 ```
 
-Output: `Jellyfin.Plugin.ActorsIndex/bin/Release/net9.0/publish/`
+Output: `Jellyfin.Plugin.ActorsIndex/bin/Release/net10.0/publish/`
 
 ## License
 

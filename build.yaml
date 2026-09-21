@@ -2,8 +2,8 @@
 name: "Trombee"
 guid: "c6d7356a-44b3-4a91-a86c-932d633b51b1"
 version: "1.0.0.0"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
+targetAbi: "12.1.0.0"
+framework: "net10.0"
 overview: "Browsable index of all actors in your library with appearance counts and thumbnails."
 description: >
   Actors Index scans your Jellyfin library and builds a full-screen browsable grid of all

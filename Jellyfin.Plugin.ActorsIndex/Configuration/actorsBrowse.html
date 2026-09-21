@@ -590,7 +590,7 @@
             moreButton.disabled = true;
             moreButton.style.display = 'none';
             var url = ApiClient.getUrl('Trombee/actors/' + encodeURIComponent(actor.actorKey) + '/items', params);
-            fetch(url, { headers: { 'X-Emby-Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
+            fetch(url, { headers: { 'Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
                 .then(function(r){ if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); })
                 .then(function(result){
                     if (requestId !== modalRequestId || !activeModalActor || activeModalActor.actorKey !== actor.actorKey) { return; }
@@ -799,7 +799,7 @@
 
         function loadLibraries() {
             var url = ApiClient.getUrl('Trombee/libraries');
-            fetch(url, { headers: { 'X-Emby-Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
+            fetch(url, { headers: { 'Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
                 .then(function(r){ if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); })
                 .then(function(result){
                     var libs = (result && result.libraries) || [];
@@ -887,7 +887,7 @@
             if (libraryIds) { params.libraryIds = libraryIds; }
 
             var url = ApiClient.getUrl('Trombee/actors-index', params);
-            fetch(url, { headers: { 'X-Emby-Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
+            fetch(url, { headers: { 'Authorization': 'MediaBrowser Token="'+ApiClient.accessToken()+'"' } })
                 .then(function(r){ if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); })
                 .then(function(result){
                     if (requestId !== loadRequestId) { return; }
