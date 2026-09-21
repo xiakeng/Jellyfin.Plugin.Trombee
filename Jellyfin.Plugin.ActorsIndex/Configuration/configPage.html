@@ -239,7 +239,7 @@
                 statusEl.textContent = 'Checking\u2026';
 
                 fetch(ApiClient.getUrl('Trombee/check-update'), {
-                    headers: { 'X-Emby-Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
+                    headers: { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
                 })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
@@ -269,7 +269,7 @@
 
                 fetch(ApiClient.getUrl('Trombee/self-update'), {
                     method: 'POST',
-                    headers: { 'X-Emby-Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
+                    headers: { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
                 })
                 .then(function (r) {
                     var httpStatus = r.status;
@@ -314,7 +314,7 @@
                     ? ApiClient.restartServer()
                     : fetch(ApiClient.getUrl('System/Restart'), {
                         method: 'POST',
-                        headers: { 'X-Emby-Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
+                        headers: { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
                       });
 
                 restartPromise
@@ -335,7 +335,7 @@
 
                 fetch(ApiClient.getUrl('Trombee/refresh-people'), {
                     method: 'POST',
-                    headers: { 'X-Emby-Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
+                    headers: { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' }
                 })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {

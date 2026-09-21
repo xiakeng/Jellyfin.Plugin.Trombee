@@ -13,6 +13,8 @@ public sealed class FrontendContractTests
         Assert.Contains("limit", html, StringComparison.Ordinal);
         Assert.Contains("Trombee/actors/", html, StringComparison.Ordinal);
         Assert.DoesNotContain("filteredActors", html, StringComparison.Ordinal);
+        Assert.Contains("'Authorization'", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("X-Emby-Authorization", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -26,6 +28,8 @@ public sealed class FrontendContractTests
         Assert.Contains("startIndex: 0", html, StringComparison.Ordinal);
         Assert.Contains("limit: 60", html, StringComparison.Ordinal);
         Assert.DoesNotContain("actor.items", html, StringComparison.Ordinal);
+        Assert.Contains("'Authorization'", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("X-Emby-Authorization", html, StringComparison.Ordinal);
     }
 
     private static string GetConfigurationFilePath(string fileName)

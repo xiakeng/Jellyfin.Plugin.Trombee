@@ -272,7 +272,7 @@ public class ActorsIndexController : ControllerBase
                     {
                         checksum = (string?)null,
                         changelog = "1.0.0 - Initial release.",
-                        targetAbi = "10.11.0.0",
+                        targetAbi = "12.1.0.0",
                         sourceUrl = (string?)null,
                         timestamp = "2026-04-04T00:00:00Z",
                         version
@@ -428,7 +428,7 @@ public class ActorsIndexController : ControllerBase
             await System.IO.File.WriteAllBytesAsync(zipPath, zipBytes).ConfigureAwait(false);
 
             // 4. Extract ZIP
-            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, tempDir, overwriteFiles: true);
+            await System.IO.Compression.ZipFile.ExtractToDirectoryAsync(zipPath, tempDir, overwriteFiles: true).ConfigureAwait(false);
 
             // 5. Copy .dll / .json / .png to the plugin directory
             var pluginDir = Path.GetDirectoryName(typeof(Plugin).Assembly.Location)!;
